@@ -1,0 +1,43 @@
+[project]
+name = "engine-yolo"
+version = "0.0.1"
+description = "An inference engine for YOLO"
+authors = [{ name = "Scott Maddox", email = "s.maddox@striveworks.us" }]
+requires-python = ">=3.11"
+readme = "README.md"
+dependencies = [
+    "fastapi>=0.129.0",
+    "uvicorn>=0.41.0",
+    "ultralytics>=8.4.14",
+    "opencv-python<4.13", # https://github.com/opencv/opencv-python/issues/1191
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.2.2",
+    "pytest-asyncio>=0.23.7",
+    "pytest-cov>=5.0.0",
+    "ruff>=0.7.0",
+    "pyright>=1.1.401",
+    "httpx>=0.28.1",
+]
+
+[tool.uv]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.ruff]
+line-length = 100
+indent-width = 4
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+
+[tool.pyright]
+venvPath = "."
+venv = ".venv"
+include = ["engine_yolo"]
+reportUnnecessaryTypeIgnoreComment = true
