@@ -2,17 +2,15 @@ import logging
 import os
 from pathlib import Path
 
-import uvicorn
 from fastapi import APIRouter, FastAPI, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 
 from engine_yolo.model_handler import ModelHandler
 from engine_yolo.protocol import (
-    decode_kserve_inputs,
-    encode_kserve_output,
-    encode_kserve_response,
-    get_request_id,
+    InferenceProtocol,
+    get_inference_protocol,
+    get_protocol_handlers,
 )
 
 logger = logging.getLogger(__name__)
@@ -22,36 +20,45 @@ class Handler:
     def __init__(
         self,
         model_path: Path,
+        protocol: InferenceProtocol,
         model_name: str = "model",
         model_handler: ModelHandler | None = None,
     ):
         self.model_name = model_name
+        protocol_handlers = get_protocol_handlers(protocol)
+        self.parse_request = protocol_handlers.parse_request
+        self.render_response = protocol_handlers.render_response
         self.model_handler = model_handler or ModelHandler(model_path)
 
-    async def infer(self, request: Request) -> JSONResponse:
-        request_body = await request.json()
+    async def infer(self, request: Request) -> Response:
+        request_body = await request.body()
         try:
-            decoded_inputs = decode_kserve_inputs(request_body)
-            mapped_outputs = await run_in_threadpool(self.model_handler.handle, decoded_inputs)
+            parsed_request = self.parse_request(
+                request_body,
+                request.headers.get("Content-Type"),
+                request.headers,
+            )
+            mapped_outputs = await run_in_threadpool(
+                self.model_handler.handle, parsed_request.inputs
+            )
         except (TypeError, ValueError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-        if len(decoded_inputs) != len(mapped_outputs):
+        num_inputs = len(parsed_request.inputs)
+        num_outputs = len(mapped_outputs)
+        if num_inputs != num_outputs:
             raise HTTPException(
                 status_code=500,
-                detail=f"input/output mismatch: {len(decoded_inputs)} != {len(mapped_outputs)}",
+                detail=f"input/output mismatch: {num_inputs} != {num_outputs}",
             )
 
-        outputs = [
-            encode_kserve_output(decoded_input.name, output)
-            for decoded_input, output in zip(decoded_inputs, mapped_outputs)
-        ]
-        response_body = encode_kserve_response(
-            model_name=self.model_name,
-            request_id=get_request_id(request_body, request.headers.get("X-Request-ID")),
-            outputs=outputs,
+        response = self.render_response(
+            self.model_name,
+            parsed_request.request_id,
+            parsed_request.inputs,
+            mapped_outputs,
         )
-        return JSONResponse(content=response_body)
+        return response
 
     async def ready(self) -> JSONResponse:
         return JSONResponse(content={"status": "ready"})
@@ -66,7 +73,7 @@ def build_app(handler: Handler) -> FastAPI:
     return app
 
 
-def main() -> None:
+def get_model_path() -> Path:
     if "MODEL_PATH" in os.environ:
         model_path = Path(os.environ["MODEL_PATH"])
         if not model_path.exists():
@@ -86,11 +93,19 @@ def main() -> None:
             raise ValueError(f"MODEL_DIR {model_dir!r} contains a non-file {model_path!r}")
     else:
         raise ValueError("MODEL_PATH or MODEL_DIR is not set")
-    handler = Handler(model_path, model_name="model")
+    return model_path
+
+
+def main() -> None:
+    import uvicorn
+
+    model_path = get_model_path()
+    protocol: InferenceProtocol = get_inference_protocol()
+    handler = Handler(model_path, protocol)
     app = build_app(handler)
 
     uvicorn.run(
-        app,
+        app=app,
         host=os.getenv("UVICORN_HOST", "0.0.0.0"),
         port=int(os.getenv("UVICORN_PORT", 8080)),
         workers=int(os.getenv("WEB_CONCURRENCY", 1)),
