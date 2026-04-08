@@ -2,10 +2,13 @@
 
 An inference engine for YOLO models.
 
+The server supports both `chariot-v2-kserve` and `chariot-v2` inference protocols.
+
 ## Configuration
 
 - `MODEL_PATH`: path to a YOLO `.pt` file.
   OR `MODEL_DIR`: path to a directory containing a YOLO `model.pt` file.
+- `CHARIOT_INFERENCE_PROTOCOL` (default: `chariot-v2-kserve`): selects either `chariot-v2-kserve` or `chariot-v2`.
 - `DEFAULT_SCORE_THRESHOLD` (default: `0.5`): the default confidence score threshold.
 - `UVICORN_HOST` (default: `0.0.0.0`)
 - `UVICORN_PORT` (default: `8080`)
